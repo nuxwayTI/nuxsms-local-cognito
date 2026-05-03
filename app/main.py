@@ -1,48 +1,535 @@
+import json
+import os
+import sqlite3
+import threading
+import time
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import filedialog, messagebox, ttk
+
+import pandas as pd
+
 from auth import login
+from tg1600 import TG1600Client
+
+CONFIG_FILE = "local_config.json"
+DB_FILE = "nuxsms_local.db"
+COUNTRY_CODE = "591"
+
+
+def default_config():
+    return {
+        "agent_id": "tg1600-001",
+        "tg_host": "192.168.20.31",
+        "tg_port": 5038,
+        "tg_user": "apiuser",
+        "tg_pass": "apipass",
+        "poll_seconds": 1.0
+    }
+
+
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        return default_config()
+
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_config(cfg):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+
+
+def normalize_phone(phone):
+    phone = str(phone).strip()
+    phone = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+
+    if phone.endswith(".0"):
+        phone = phone[:-2]
+
+    if phone.startswith("+"):
+        return phone
+
+    if phone.startswith(COUNTRY_CODE):
+        return "+" + phone
+
+    return "+" + COUNTRY_CODE + phone
+
+
+def parse_chips(chips_raw):
+    chips = []
+    for item in chips_raw.split(","):
+        item = item.strip()
+        if item:
+            chips.append(int(item))
+
+    if not chips:
+        raise ValueError("Debes ingresar al menos un chip.")
+
+    return chips
+
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS campaigns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        message TEXT NOT NULL,
+        chips TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        campaign_id INTEGER NOT NULL,
+        phone TEXT NOT NULL,
+        text TEXT NOT NULL,
+        chip INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        result TEXT,
+        created_at TEXT NOT NULL,
+        sent_at TEXT
+    )
+    """)
+
+    conn.commit()
+    conn.close()
 
 
 class App:
     def __init__(self, root):
+        init_db()
+
         self.root = root
-        root.title("NuxSMS Local")
-        root.geometry("700x500")
-        root.configure(bg="#0b1020")
+        self.root.title("NuxSMS Local")
+        self.root.geometry("950x720")
+        self.root.configure(bg="#0b1020")
 
-        tk.Label(root, text="NUXSMS LOCAL", font=("Arial", 28, "bold"),
-                 fg="white", bg="#0b1020").pack(pady=30)
+        self.authenticated = False
+        self.user_email = None
+        self.cfg = load_config()
+        self.running = False
+        self.worker = None
 
-        self.status = tk.Label(root, text="No autenticado",
-                               fg="red", bg="#0b1020", font=("Arial", 14))
-        self.status.pack()
+        self.setup_ui()
 
-        tk.Button(root, text="Iniciar sesión",
-                  command=self.do_login,
-                  bg="orange", font=("Arial", 12)).pack(pady=20)
+    def setup_ui(self):
+        header = tk.Frame(self.root, bg="#0b1020")
+        header.pack(fill="x", padx=18, pady=14)
 
-        self.output = tk.Text(root, height=10, bg="black", fg="white")
-        self.output.pack(padx=20, pady=20)
+        tk.Label(
+            header,
+            text="NUXSMS LOCAL",
+            font=("Arial", 26, "bold"),
+            fg="#f8fafc",
+            bg="#0b1020"
+        ).pack(anchor="w")
 
-    def log(self, txt):
-        self.output.insert(tk.END, txt + "\n")
+        tk.Label(
+            header,
+            text="Cognito + SQLite + TG Series Gateway",
+            font=("Arial", 12),
+            fg="#cbd5e1",
+            bg="#0b1020"
+        ).pack(anchor="w")
+
+        self.status = tk.Label(
+            self.root,
+            text="Estado: no autenticado",
+            fg="#ef4444",
+            bg="#0b1020",
+            font=("Arial", 12, "bold")
+        )
+        self.status.pack(pady=4)
+
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True, padx=18, pady=12)
+
+        self.tab_login = tk.Frame(self.notebook, bg="#111827")
+        self.tab_config = tk.Frame(self.notebook, bg="#111827")
+        self.tab_campaign = tk.Frame(self.notebook, bg="#111827")
+        self.tab_history = tk.Frame(self.notebook, bg="#111827")
+
+        self.notebook.add(self.tab_login, text="Login")
+        self.notebook.add(self.tab_config, text="Configuración TG")
+        self.notebook.add(self.tab_campaign, text="Lanzador SMS")
+        self.notebook.add(self.tab_history, text="Historial")
+
+        self.build_login_tab()
+        self.build_config_tab()
+        self.build_campaign_tab()
+        self.build_history_tab()
+
+        self.lock_tabs()
+
+    def lock_tabs(self):
+        if not self.authenticated:
+            self.notebook.tab(1, state="disabled")
+            self.notebook.tab(2, state="disabled")
+            self.notebook.tab(3, state="disabled")
+        else:
+            self.notebook.tab(1, state="normal")
+            self.notebook.tab(2, state="normal")
+            self.notebook.tab(3, state="normal")
+
+    def build_login_tab(self):
+        tk.Label(
+            self.tab_login,
+            text="Acceso Cognito",
+            font=("Arial", 22, "bold"),
+            fg="#f8fafc",
+            bg="#111827"
+        ).pack(pady=40)
+
+        tk.Button(
+            self.tab_login,
+            text="Iniciar sesión",
+            command=self.do_login,
+            bg="#f59e0b",
+            fg="#111827",
+            font=("Arial", 12, "bold"),
+            padx=20,
+            pady=8
+        ).pack(pady=10)
+
+        self.login_output = tk.Text(self.tab_login, height=12, width=95, bg="#030712", fg="#e5e7eb")
+        self.login_output.pack(pady=20)
+
+    def build_config_tab(self):
+        form = tk.Frame(self.tab_config, bg="#111827", padx=20, pady=20)
+        form.pack(anchor="nw", fill="x")
+
+        self.entries = {}
+
+        fields = [
+            ("agent_id", "Agent ID"),
+            ("tg_host", "IP TG"),
+            ("tg_port", "Puerto TG"),
+            ("tg_user", "Usuario TG"),
+            ("tg_pass", "Password TG"),
+            ("poll_seconds", "Poll segundos")
+        ]
+
+        for row, (key, label) in enumerate(fields):
+            tk.Label(form, text=label, fg="#e5e7eb", bg="#111827", font=("Arial", 10, "bold")).grid(row=row, column=0, sticky="w", pady=6)
+
+            entry = tk.Entry(
+                form,
+                width=55,
+                show="*" if key == "tg_pass" else "",
+                bg="#0c1220",
+                fg="#f8fafc",
+                insertbackground="#f8fafc"
+            )
+            entry.insert(0, str(self.cfg.get(key, "")))
+            entry.grid(row=row, column=1, padx=12, pady=6)
+
+            self.entries[key] = entry
+
+        tk.Button(
+            form,
+            text="Guardar configuración",
+            command=self.save_tg_config,
+            bg="#f59e0b",
+            fg="#111827",
+            font=("Arial", 10, "bold")
+        ).grid(row=len(fields), column=1, sticky="w", pady=12)
+
+        tk.Button(
+            form,
+            text="Probar conexión TG",
+            command=self.test_tg_connection,
+            bg="#2563eb",
+            fg="white",
+            font=("Arial", 10, "bold")
+        ).grid(row=len(fields), column=1, sticky="e", pady=12)
+
+    def build_campaign_tab(self):
+        top = tk.Frame(self.tab_campaign, bg="#111827", padx=20, pady=20)
+        top.pack(fill="x")
+
+        tk.Label(top, text="Nombre campaña", fg="#e5e7eb", bg="#111827").grid(row=0, column=0, sticky="w")
+        self.campaign_name = tk.Entry(top, width=55, bg="#0c1220", fg="#f8fafc")
+        self.campaign_name.grid(row=0, column=1, padx=10, pady=5)
+
+        tk.Label(top, text="Mensaje", fg="#e5e7eb", bg="#111827").grid(row=1, column=0, sticky="w")
+        self.message_text = tk.Text(top, width=55, height=4, bg="#0c1220", fg="#f8fafc")
+        self.message_text.grid(row=1, column=1, padx=10, pady=5)
+
+        tk.Label(top, text="Chips. Ej: 2,3,4", fg="#e5e7eb", bg="#111827").grid(row=2, column=0, sticky="w")
+        self.chips_entry = tk.Entry(top, width=55, bg="#0c1220", fg="#f8fafc")
+        self.chips_entry.insert(0, "2")
+        self.chips_entry.grid(row=2, column=1, padx=10, pady=5)
+
+        self.file_path = tk.StringVar()
+
+        tk.Button(top, text="Seleccionar Excel/CSV", command=self.select_file, bg="#2563eb", fg="white").grid(row=3, column=0, pady=8)
+        tk.Label(top, textvariable=self.file_path, fg="#cbd5e1", bg="#111827").grid(row=3, column=1, sticky="w")
+
+        tk.Button(top, text="Crear campaña local", command=self.create_campaign, bg="#f59e0b", fg="#111827").grid(row=4, column=0, pady=10)
+        tk.Button(top, text="Iniciar envío", command=self.start_sending, bg="#22c55e", fg="#111827").grid(row=4, column=1, sticky="w", pady=10)
+
+        self.send_log = tk.Text(self.tab_campaign, height=16, width=110, bg="#030712", fg="#e5e7eb")
+        self.send_log.pack(padx=20, pady=10)
+
+    def build_history_tab(self):
+        tk.Button(self.tab_history, text="Actualizar historial", command=self.load_history, bg="#2563eb", fg="white").pack(anchor="w", padx=20, pady=12)
+
+        self.history_text = tk.Text(self.tab_history, height=25, width=115, bg="#030712", fg="#e5e7eb")
+        self.history_text.pack(padx=20, pady=10)
+
+    def log_login(self, text):
+        self.login_output.insert(tk.END, text + "\n")
+        self.login_output.see(tk.END)
+
+    def log_send(self, text):
+        self.send_log.insert(tk.END, text + "\n")
+        self.send_log.see(tk.END)
 
     def do_login(self):
         try:
-            self.log("Abriendo Cognito...")
-            user = login()
+            self.log_login("Abriendo Cognito...")
+            claims = login()
 
-            email = user.get("email", "sin email")
+            self.user_email = claims.get("email", "usuario")
+            self.authenticated = True
 
-            self.status.config(text=f"Autenticado: {email}", fg="green")
-            self.log("LOGIN OK")
-            self.log(str(user))
+            self.status.config(text=f"Autenticado: {self.user_email}", fg="#22c55e")
+            self.log_login(f"LOGIN OK: {self.user_email}")
+
+            self.lock_tabs()
+            self.notebook.select(self.tab_config)
 
         except Exception as e:
-            self.log("ERROR: " + str(e))
+            self.status.config(text="Error de autenticación", fg="#ef4444")
+            self.log_login("ERROR: " + str(e))
             messagebox.showerror("Error", str(e))
 
+    def save_tg_config(self):
+        cfg = {}
 
-root = tk.Tk()
-app = App(root)
-root.mainloop()
+        for key, entry in self.entries.items():
+            value = entry.get().strip()
+
+            if key == "tg_port":
+                value = int(value)
+
+            if key == "poll_seconds":
+                value = float(value)
+
+            cfg[key] = value
+
+        save_config(cfg)
+        self.cfg = cfg
+        messagebox.showinfo("OK", "Configuración guardada")
+
+    def test_tg_connection(self):
+        try:
+            self.save_tg_config()
+
+            tg = TG1600Client(
+                host=self.cfg["tg_host"],
+                port=self.cfg["tg_port"],
+                username=self.cfg["tg_user"],
+                password=self.cfg["tg_pass"]
+            )
+
+            tg.connect()
+            tg.close()
+
+            messagebox.showinfo("OK", "TG conectado correctamente")
+
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def select_file(self):
+        path = filedialog.askopenfilename(filetypes=[("Excel/CSV", "*.xlsx *.csv")])
+        if path:
+            self.file_path.set(path)
+
+    def read_phones(self, path):
+        if path.lower().endswith(".csv"):
+            df = pd.read_csv(path)
+        else:
+            df = pd.read_excel(path)
+
+        first_col = df.columns[0]
+        phones = []
+
+        for value in df[first_col].dropna().tolist():
+            phones.append(normalize_phone(value))
+
+        return phones
+
+    def create_campaign(self):
+        try:
+            name = self.campaign_name.get().strip()
+            message = self.message_text.get("1.0", tk.END).strip()
+            chips_raw = self.chips_entry.get().strip()
+            path = self.file_path.get()
+
+            if not name or not message or not chips_raw or not path:
+                raise Exception("Completa campaña, mensaje, chips y archivo.")
+
+            chips = parse_chips(chips_raw)
+            phones = self.read_phones(path)
+
+            conn = sqlite3.connect(DB_FILE)
+            cur = conn.cursor()
+
+            created_at = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            cur.execute(
+                "INSERT INTO campaigns (name, message, chips, created_at) VALUES (?, ?, ?, ?)",
+                (name, message, ",".join(str(c) for c in chips), created_at)
+            )
+
+            campaign_id = cur.lastrowid
+
+            for index, phone in enumerate(phones):
+                chip = chips[index % len(chips)]
+                cur.execute(
+                    """
+                    INSERT INTO messages
+                    (campaign_id, phone, text, chip, status, result, created_at, sent_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (campaign_id, phone, message, chip, "queued", None, created_at, None)
+                )
+
+            conn.commit()
+            conn.close()
+
+            self.log_send(f"Campaña creada ID {campaign_id} con {len(phones)} contactos.")
+            self.load_history()
+
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def start_sending(self):
+        if self.running:
+            messagebox.showinfo("Info", "Ya está enviando.")
+            return
+
+        self.save_tg_config()
+        self.running = True
+
+        self.worker = threading.Thread(target=self.send_loop, daemon=True)
+        self.worker.start()
+
+    def send_loop(self):
+        try:
+            self.log_send("Conectando al TG...")
+
+            tg = TG1600Client(
+                host=self.cfg["tg_host"],
+                port=self.cfg["tg_port"],
+                username=self.cfg["tg_user"],
+                password=self.cfg["tg_pass"]
+            )
+
+            tg.connect()
+            self.log_send("TG conectado correctamente.")
+
+            poll_seconds = float(self.cfg["poll_seconds"])
+
+            while self.running:
+                conn = sqlite3.connect(DB_FILE)
+                cur = conn.cursor()
+
+                cur.execute(
+                    """
+                    SELECT id, phone, text, chip
+                    FROM messages
+                    WHERE status='queued'
+                    ORDER BY id ASC
+                    LIMIT 1
+                    """
+                )
+
+                row = cur.fetchone()
+
+                if not row:
+                    conn.close()
+                    self.log_send("No hay más mensajes en cola.")
+                    self.running = False
+                    break
+
+                msg_id, phone, text, chip = row
+
+                cur.execute("UPDATE messages SET status='processing' WHERE id=?", (msg_id,))
+                conn.commit()
+                conn.close()
+
+                self.log_send(f"Enviando ID {msg_id} a {phone} por chip {chip}")
+
+                result = tg.send_sms(
+                    chip=chip,
+                    to_number=phone,
+                    message=text,
+                    message_id=msg_id
+                )
+
+                status = "sent" if result["success"] else "failed"
+                sent_at = time.strftime("%Y-%m-%d %H:%M:%S")
+
+                conn = sqlite3.connect(DB_FILE)
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE messages
+                    SET status=?, result=?, sent_at=?
+                    WHERE id=?
+                    """,
+                    (status, result["raw"][:3000], sent_at, msg_id)
+                )
+                conn.commit()
+                conn.close()
+
+                self.log_send(f"Resultado ID {msg_id}: {status}")
+
+                time.sleep(poll_seconds)
+
+            tg.close()
+
+        except Exception as e:
+            self.running = False
+            self.log_send("ERROR: " + str(e))
+
+    def load_history(self):
+        conn = sqlite3.connect(DB_FILE)
+        cur = conn.cursor()
+
+        cur.execute("""
+        SELECT c.id, c.name, c.chips, c.created_at,
+               COUNT(m.id),
+               SUM(CASE WHEN m.status='sent' THEN 1 ELSE 0 END),
+               SUM(CASE WHEN m.status='failed' THEN 1 ELSE 0 END),
+               SUM(CASE WHEN m.status='queued' THEN 1 ELSE 0 END)
+        FROM campaigns c
+        LEFT JOIN messages m ON m.campaign_id = c.id
+        GROUP BY c.id
+        ORDER BY c.id DESC
+        """)
+
+        rows = cur.fetchall()
+        conn.close()
+
+        self.history_text.delete("1.0", tk.END)
+
+        for r in rows:
+            self.history_text.insert(
+                tk.END,
+                f"Campaña {r[0]} | {r[1]} | Chips {r[2]} | Total {r[4]} | Enviados {r[5]} | Fallidos {r[6]} | Cola {r[7]} | {r[3]}\n"
+            )
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
