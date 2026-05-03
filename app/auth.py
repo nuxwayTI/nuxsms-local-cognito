@@ -36,18 +36,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/callback":
             if "code" in params:
                 AUTH_RESULT["code"] = params["code"][0]
-
                 self.send_response(200)
                 self.send_header("Content-type", "text/html")
                 self.end_headers()
-
-                self.wfile.write(b"""
-                <h2>Login correcto</h2>
-                Puedes cerrar esta ventana.
-                """)
+                self.wfile.write(b"<h2>Login correcto</h2><p>Puedes cerrar esta ventana.</p>")
             else:
                 AUTH_RESULT["error"] = str(params)
-
+                self.send_response(400)
+                self.end_headers()
         else:
             self.send_response(404)
             self.end_headers()
@@ -76,13 +72,16 @@ def exchange_code(code, verifier):
 
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-    r = requests.post(url, data=data, headers=headers)
-    return r.json()
+    response = requests.post(url, data=data, headers=headers, timeout=30)
+    response.raise_for_status()
+    return response.json()
 
 
 def get_jwks():
     url = f"https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}/.well-known/jwks.json"
-    return requests.get(url).json()
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    return response.json()
 
 
 def decode_token(token):
@@ -94,6 +93,9 @@ def decode_token(token):
         if k["kid"] == header["kid"]:
             key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(k))
             break
+
+    if key is None:
+        raise Exception("No se encontró llave pública Cognito")
 
     issuer = f"https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}"
 
@@ -108,6 +110,7 @@ def decode_token(token):
 
 def login():
     AUTH_RESULT["code"] = None
+    AUTH_RESULT["error"] = None
 
     verifier, challenge = create_pkce_pair()
 
@@ -117,7 +120,8 @@ def login():
         "scope": SCOPES,
         "redirect_uri": CALLBACK_URL,
         "code_challenge": challenge,
-        "code_challenge_method": "S256"
+        "code_challenge_method": "S256",
+        "prompt": "login"
     }
 
     url = f"{COGNITO_DOMAIN}/oauth2/authorize?{urllib.parse.urlencode(params)}"
@@ -127,14 +131,23 @@ def login():
 
     start = time.time()
 
-    while time.time() - start < 120:
-        if AUTH_RESULT["code"]:
-            tokens = exchange_code(AUTH_RESULT["code"], verifier)
-            claims = decode_token(tokens["id_token"])
-            server.shutdown()
-            return claims
+    try:
+        while time.time() - start < 180:
+            if AUTH_RESULT["code"]:
+                tokens = exchange_code(AUTH_RESULT["code"], verifier)
+                claims = decode_token(tokens["id_token"])
+                return claims
 
-        time.sleep(0.5)
+            if AUTH_RESULT["error"]:
+                raise Exception(AUTH_RESULT["error"])
 
-    server.shutdown()
-    raise Exception("Timeout login")
+            time.sleep(0.5)
+
+        raise Exception("Timeout login Cognito")
+
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+
