@@ -172,7 +172,12 @@ def login():
                     raise Exception("Cognito no devolvio id_token: " + str(tokens))
 
                 claims = decode_token(tokens["id_token"])
-                return claims
+
+                return {
+                    "claims": claims,
+                    "tokens": tokens,
+                    "login_time": time.time()
+                }
 
             if AUTH_RESULT["error"]:
                 raise Exception(AUTH_RESULT["error"])
