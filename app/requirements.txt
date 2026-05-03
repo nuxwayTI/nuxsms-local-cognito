@@ -1,1 +1,4 @@
-
+requests
+pyjwt[crypto]
+pillow
+pyinstaller
