@@ -1,3 +1,5 @@
+import sys
+from PIL import Image, ImageTk
 import json
 import os
 import sqlite3
