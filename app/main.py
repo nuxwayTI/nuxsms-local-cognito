@@ -12,8 +12,10 @@ from auth import login
 from tg1600 import TG1600Client
 
 CONFIG_FILE = "local_config.json"
+SESSION_FILE = "session.json"
 DB_FILE = "nuxsms_local.db"
 COUNTRY_CODE = "591"
+SESSION_MAX_HOURS = 24
 
 
 def default_config():
@@ -38,6 +40,58 @@ def load_config():
 def save_config(cfg):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
+
+
+def save_session(data):
+    with open(SESSION_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def load_session():
+    if not os.path.exists(SESSION_FILE):
+        return None
+
+    try:
+        with open(SESSION_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def clear_session():
+    if os.path.exists(SESSION_FILE):
+        os.remove(SESSION_FILE)
+
+
+def session_is_valid(session):
+    if not session:
+        return False
+
+    login_time = session.get("login_time")
+    if not login_time:
+        return False
+
+    age_seconds = time.time() - float(login_time)
+    max_seconds = SESSION_MAX_HOURS * 60 * 60
+
+    return age_seconds < max_seconds
+
+
+def session_remaining_text(session):
+    if not session or not session.get("login_time"):
+        return "0h"
+
+    age_seconds = time.time() - float(session["login_time"])
+    max_seconds = SESSION_MAX_HOURS * 60 * 60
+    remaining = max_seconds - age_seconds
+
+    if remaining <= 0:
+        return "expirada"
+
+    hours = int(remaining // 3600)
+    minutes = int((remaining % 3600) // 60)
+
+    return f"{hours}h {minutes}m"
 
 
 def normalize_phone(phone):
@@ -112,11 +166,13 @@ class App:
 
         self.authenticated = False
         self.user_email = None
+        self.session = None
         self.cfg = load_config()
         self.running = False
         self.worker = None
 
         self.setup_ui()
+        self.try_restore_session()
 
     def setup_ui(self):
         header = tk.Frame(self.root, bg="#0b1020")
@@ -166,6 +222,7 @@ class App:
         self.build_history_tab()
 
         self.lock_tabs()
+        self.root.after(60000, self.check_session_timer)
 
     def lock_tabs(self):
         if not self.authenticated:
@@ -184,7 +241,7 @@ class App:
             font=("Arial", 22, "bold"),
             fg="#f8fafc",
             bg="#111827"
-        ).pack(pady=40)
+        ).pack(pady=32)
 
         tk.Button(
             self.tab_login,
@@ -195,7 +252,18 @@ class App:
             font=("Arial", 12, "bold"),
             padx=20,
             pady=8
-        ).pack(pady=10)
+        ).pack(pady=8)
+
+        tk.Button(
+            self.tab_login,
+            text="Cerrar sesión local",
+            command=self.do_logout,
+            bg="#2563eb",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=18,
+            pady=7
+        ).pack(pady=5)
 
         self.login_output = tk.Text(self.tab_login, height=12, width=95, bg="#030712", fg="#e5e7eb")
         self.login_output.pack(pady=20)
@@ -291,16 +359,53 @@ class App:
         self.send_log.insert(tk.END, text + "\n")
         self.send_log.see(tk.END)
 
+    def try_restore_session(self):
+        session = load_session()
+
+        if session_is_valid(session):
+            claims = session.get("claims", {})
+            self.user_email = claims.get("email", "usuario")
+            self.session = session
+            self.authenticated = True
+
+            self.status.config(
+                text=f"Autenticado: {self.user_email} | Restante: {session_remaining_text(session)}",
+                fg="#22c55e"
+            )
+
+            self.log_login(f"Sesión restaurada: {self.user_email}")
+            self.log_login(f"Validez restante: {session_remaining_text(session)}")
+            self.lock_tabs()
+        else:
+            clear_session()
+            self.authenticated = False
+            self.lock_tabs()
+
     def do_login(self):
         try:
             self.log_login("Abriendo Cognito...")
-            claims = login()
+            result = login()
 
+            claims = result.get("claims", {})
             self.user_email = claims.get("email", "usuario")
             self.authenticated = True
 
-            self.status.config(text=f"Autenticado: {self.user_email}", fg="#22c55e")
+            session = {
+                "claims": claims,
+                "tokens": result.get("tokens", {}),
+                "login_time": result.get("login_time", time.time())
+            }
+
+            save_session(session)
+            self.session = session
+
+            self.status.config(
+                text=f"Autenticado: {self.user_email} | Restante: {session_remaining_text(session)}",
+                fg="#22c55e"
+            )
+
             self.log_login(f"LOGIN OK: {self.user_email}")
+            self.log_login(f"Sesión válida por {SESSION_MAX_HOURS} horas.")
 
             self.lock_tabs()
             self.notebook.select(self.tab_config)
@@ -309,6 +414,34 @@ class App:
             self.status.config(text="Error de autenticación", fg="#ef4444")
             self.log_login("ERROR: " + str(e))
             messagebox.showerror("Error", str(e))
+
+    def do_logout(self):
+        clear_session()
+        self.authenticated = False
+        self.user_email = None
+        self.session = None
+        self.status.config(text="Estado: no autenticado", fg="#ef4444")
+        self.lock_tabs()
+        self.notebook.select(self.tab_login)
+        self.log_login("Sesión local cerrada.")
+
+    def check_session_timer(self):
+        if self.authenticated:
+            if not session_is_valid(self.session):
+                self.running = False
+                clear_session()
+                self.authenticated = False
+                self.status.config(text="Sesión expirada. Inicia sesión otra vez.", fg="#ef4444")
+                self.lock_tabs()
+                self.notebook.select(self.tab_login)
+                messagebox.showwarning("Sesión expirada", "Han pasado 24 horas. Debes iniciar sesión nuevamente.")
+            else:
+                self.status.config(
+                    text=f"Autenticado: {self.user_email} | Restante: {session_remaining_text(self.session)}",
+                    fg="#22c55e"
+                )
+
+        self.root.after(60000, self.check_session_timer)
 
     def save_tg_config(self):
         cfg = {}
@@ -416,6 +549,14 @@ class App:
             messagebox.showinfo("Info", "Ya está enviando.")
             return
 
+        if not session_is_valid(self.session):
+            self.running = False
+            clear_session()
+            self.authenticated = False
+            self.lock_tabs()
+            messagebox.showwarning("Sesión expirada", "Debes iniciar sesión antes de enviar.")
+            return
+
         self.save_tg_config()
         self.running = True
 
@@ -439,6 +580,14 @@ class App:
             poll_seconds = float(self.cfg["poll_seconds"])
 
             while self.running:
+                if not session_is_valid(self.session):
+                    self.running = False
+                    clear_session()
+                    self.authenticated = False
+                    self.root.after(0, self.lock_tabs)
+                    self.log_send("Sesión expirada. Envío detenido.")
+                    break
+
                 conn = sqlite3.connect(DB_FILE)
                 cur = conn.cursor()
 
