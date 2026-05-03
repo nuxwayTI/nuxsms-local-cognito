@@ -58,7 +58,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b"""
             <html>
             <body style="font-family:Arial;text-align:center;margin-top:60px;">
-                <h2>Sesion Cognito cerrada</h2>
+                <h2>Sesion cerrada</h2>
                 <p>Ahora vuelve al programa.</p>
             </body>
             </html>
@@ -86,12 +86,15 @@ def exchange_code(code, verifier):
         "client_id": APP_CLIENT_ID,
         "code": code,
         "redirect_uri": CALLBACK_URL,
-        "code_verifier": verifier
+        "code_verifier": verifier,
     }
 
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
-    response = requests.post(url, data=data, headers=headers, timeout=30)
+    response = requests.post(
+        url,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=30,
+    )
     response.raise_for_status()
     return response.json()
 
@@ -123,16 +126,15 @@ def decode_token(token):
         key,
         algorithms=["RS256"],
         audience=APP_CLIENT_ID,
-        issuer=issuer
+        issuer=issuer,
     )
 
 
 def open_logout_first():
     logout_params = {
         "client_id": APP_CLIENT_ID,
-        "logout_uri": LOGOUT_URL
+        "logout_uri": LOGOUT_URL,
     }
-
     logout_url = f"{COGNITO_DOMAIN}/logout?{urllib.parse.urlencode(logout_params)}"
     webbrowser.open(logout_url)
     time.sleep(2)
@@ -151,7 +153,7 @@ def login():
         "redirect_uri": CALLBACK_URL,
         "code_challenge": challenge,
         "code_challenge_method": "S256",
-        "prompt": "login"
+        "prompt": "login",
     }
 
     login_url = f"{COGNITO_DOMAIN}/oauth2/authorize?{urllib.parse.urlencode(params)}"
@@ -176,7 +178,7 @@ def login():
                 return {
                     "claims": claims,
                     "tokens": tokens,
-                    "login_time": time.time()
+                    "login_time": time.time(),
                 }
 
             if AUTH_RESULT["error"]:
