@@ -1,25 +1,12 @@
-# nuxsms-local-cognito
 # NuxSMS Local Cognito
 
-Prueba de login AWS Cognito para un EXE local.
-
-## Configuración Cognito
-
-Callback URL:
-
-http://localhost:8765/callback
-
-Logout URL:
-
-http://localhost:8765/logout
-
-OAuth:
-
-Authorization code grant + PKCE
-
-Scopes:
-
-openid email profile
+EXE local con:
+- Login AWS Cognito
+- Sesión local válida 24 horas
+- SQLite local
+- Campañas SMS
+- Round robin por chips
+- Conexión TG1600/TG Series puerto 5038
 
 ## Ejecutar
 
@@ -27,6 +14,13 @@ cd app
 pip install -r requirements.txt
 python main.py
 
-## Compilar EXE
+## Crear EXE con logo
 
-python -m PyInstaller --onefile --windowed main.py
+python -m PyInstaller --onefile --windowed --add-data "logo.png;." main.py
+
+## Archivos locales
+
+local_config.json
+session.json
+nuxsms_local.db
+
