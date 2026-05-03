@@ -2,3 +2,5 @@ requests
 pyjwt[crypto]
 pillow
 pyinstaller
+openpyxl
+pandas
