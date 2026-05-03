@@ -5,8 +5,6 @@ APP_CLIENT_ID = "6sdnf5j17rhtl6l2tp1l02oq21"
 
 CALLBACK_HOST = "localhost"
 CALLBACK_PORT = 8765
-
-# IMPORTANTE: HTTP (no https)
 CALLBACK_URL = "http://localhost:8765/callback"
 LOGOUT_URL = "http://localhost:8765/logout"
 
