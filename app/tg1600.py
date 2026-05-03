@@ -17,7 +17,7 @@ class TG1600Client:
         self.sock.settimeout(self.timeout)
 
         login_cmd = (
-            f"Action: Login\r\n"
+            "Action: Login\r\n"
             f"Username: {self.username}\r\n"
             f"Secret: {self.password}\r\n\r\n"
         )
@@ -32,6 +32,7 @@ class TG1600Client:
 
     def send_sms(self, chip, to_number, message, message_id):
         real_chip = int(chip)
+
         safe_message = urllib.parse.quote(message)
         clean_number = str(to_number).replace("+", "").replace(" ", "")
 
@@ -55,7 +56,7 @@ class TG1600Client:
             "success": success,
             "raw": response,
             "requested_chip": chip,
-            "real_chip": real_chip
+            "real_chip": real_chip,
         }
 
     def _read_some(self):
