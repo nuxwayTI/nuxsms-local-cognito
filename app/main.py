@@ -40,7 +40,6 @@ def default_config():
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         return default_config()
-
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -58,7 +57,6 @@ def save_session(data):
 def load_session():
     if not os.path.exists(SESSION_FILE):
         return None
-
     try:
         with open(SESSION_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -74,64 +72,42 @@ def clear_session():
 def session_is_valid(session):
     if not session:
         return False
-
     login_time = session.get("login_time")
     if not login_time:
         return False
-
-    age_seconds = time.time() - float(login_time)
-    max_seconds = SESSION_MAX_HOURS * 60 * 60
-
-    return age_seconds < max_seconds
+    return (time.time() - float(login_time)) < (SESSION_MAX_HOURS * 3600)
 
 
 def session_remaining_text(session):
     if not session or not session.get("login_time"):
         return "0h"
-
-    age_seconds = time.time() - float(session["login_time"])
-    max_seconds = SESSION_MAX_HOURS * 60 * 60
-    remaining = max_seconds - age_seconds
-
+    remaining = (SESSION_MAX_HOURS * 3600) - (time.time() - float(session["login_time"]))
     if remaining <= 0:
         return "expirada"
-
-    hours = int(remaining // 3600)
-    minutes = int((remaining % 3600) // 60)
-
-    return f"{hours}h {minutes}m"
+    h = int(remaining // 3600)
+    m = int((remaining % 3600) // 60)
+    return f"{h}h {m}m"
 
 
 def normalize_phone(phone):
-    phone = str(phone).strip()
-    phone = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-
+    phone = str(phone).strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
     if phone.endswith(".0"):
         phone = phone[:-2]
-
     if phone.startswith("+"):
         return phone
-
     if phone.startswith(COUNTRY_CODE):
         return "+" + phone
-
     return "+" + COUNTRY_CODE + phone
 
 
 def parse_chips(chips_raw):
     chips = []
-
     for item in chips_raw.split(","):
         item = item.strip()
         if item:
-            chip = int(item)
-            if chip < 1 or chip > 32:
-                raise ValueError("Chip fuera de rango.")
-            chips.append(chip)
-
+            chips.append(int(item))
     if not chips:
         raise ValueError("Debes ingresar al menos un chip.")
-
     return chips
 
 
@@ -173,7 +149,7 @@ class App:
 
         self.root = root
         self.root.title("NuxSMS Local")
-        self.root.geometry("1000x740")
+        self.root.geometry("1100x760")
         self.root.configure(bg="#0b1020")
 
         self.authenticated = False
@@ -197,10 +173,8 @@ class App:
                 img = Image.open(logo_path)
                 img = img.resize((100, 100), Image.LANCZOS)
                 self.logo_img = ImageTk.PhotoImage(img)
-
                 logo_box = tk.Frame(header, bg="#ffffff", padx=6, pady=6)
                 logo_box.pack(side="left", padx=(0, 18))
-
                 tk.Label(logo_box, image=self.logo_img, bg="#ffffff").pack()
             except Exception:
                 pass
@@ -208,29 +182,13 @@ class App:
         title_box = tk.Frame(header, bg="#0b1020")
         title_box.pack(side="left")
 
-        tk.Label(
-            title_box,
-            text="NUXSMS LOCAL",
-            font=("Arial", 26, "bold"),
-            fg="#f8fafc",
-            bg="#0b1020",
-        ).pack(anchor="w")
+        tk.Label(title_box, text="NUXSMS LOCAL", font=("Arial", 26, "bold"),
+                 fg="#f8fafc", bg="#0b1020").pack(anchor="w")
+        tk.Label(title_box, text="Acceso local + TG Series Gateway", font=("Arial", 12),
+                 fg="#cbd5e1", bg="#0b1020").pack(anchor="w")
 
-        tk.Label(
-            title_box,
-            text="Acceso local + TG Series Gateway",
-            font=("Arial", 12),
-            fg="#cbd5e1",
-            bg="#0b1020",
-        ).pack(anchor="w")
-
-        self.status = tk.Label(
-            self.root,
-            text="Estado: no autenticado",
-            fg="#ef4444",
-            bg="#0b1020",
-            font=("Arial", 12, "bold"),
-        )
+        self.status = tk.Label(self.root, text="Estado: no autenticado",
+                               fg="#ef4444", bg="#0b1020", font=("Arial", 12, "bold"))
         self.status.pack(pady=4)
 
         self.notebook = ttk.Notebook(self.root)
@@ -255,53 +213,24 @@ class App:
         self.root.after(60000, self.check_session_timer)
 
     def lock_tabs(self):
-        if not self.authenticated:
-            self.notebook.tab(1, state="disabled")
-            self.notebook.tab(2, state="disabled")
-            self.notebook.tab(3, state="disabled")
-        else:
-            self.notebook.tab(1, state="normal")
-            self.notebook.tab(2, state="normal")
-            self.notebook.tab(3, state="normal")
+        state = "normal" if self.authenticated else "disabled"
+        self.notebook.tab(1, state=state)
+        self.notebook.tab(2, state=state)
+        self.notebook.tab(3, state=state)
 
     def build_login_tab(self):
-        tk.Label(
-            self.tab_login,
-            text="Acceso al sistema",
-            font=("Arial", 22, "bold"),
-            fg="#f8fafc",
-            bg="#111827",
-        ).pack(pady=32)
+        tk.Label(self.tab_login, text="Acceso al sistema", font=("Arial", 22, "bold"),
+                 fg="#f8fafc", bg="#111827").pack(pady=32)
 
-        tk.Button(
-            self.tab_login,
-            text="Iniciar sesión",
-            command=self.do_login,
-            bg="#f59e0b",
-            fg="#111827",
-            font=("Arial", 12, "bold"),
-            padx=20,
-            pady=8,
-        ).pack(pady=8)
+        tk.Button(self.tab_login, text="Iniciar sesión", command=self.do_login,
+                  bg="#f59e0b", fg="#111827", font=("Arial", 12, "bold"),
+                  padx=20, pady=8).pack(pady=8)
 
-        tk.Button(
-            self.tab_login,
-            text="Cerrar sesión local",
-            command=self.do_logout,
-            bg="#2563eb",
-            fg="white",
-            font=("Arial", 11, "bold"),
-            padx=18,
-            pady=7,
-        ).pack(pady=5)
+        tk.Button(self.tab_login, text="Cerrar sesión local", command=self.do_logout,
+                  bg="#2563eb", fg="white", font=("Arial", 11, "bold"),
+                  padx=18, pady=7).pack(pady=5)
 
-        self.login_output = tk.Text(
-            self.tab_login,
-            height=12,
-            width=100,
-            bg="#030712",
-            fg="#e5e7eb",
-        )
+        self.login_output = tk.Text(self.tab_login, height=12, width=110, bg="#030712", fg="#e5e7eb")
         self.login_output.pack(pady=20)
 
     def build_config_tab(self):
@@ -309,7 +238,6 @@ class App:
         form.pack(anchor="nw", fill="x")
 
         self.entries = {}
-
         fields = [
             ("agent_id", "Agent ID"),
             ("tg_host", "IP TG"),
@@ -320,44 +248,23 @@ class App:
         ]
 
         for row, (key, label) in enumerate(fields):
-            tk.Label(
-                form,
-                text=label,
-                fg="#e5e7eb",
-                bg="#111827",
-                font=("Arial", 10, "bold"),
-            ).grid(row=row, column=0, sticky="w", pady=6)
-
-            entry = tk.Entry(
-                form,
-                width=58,
-                show="*" if key == "tg_pass" else "",
-                bg="#0c1220",
-                fg="#f8fafc",
-                insertbackground="#f8fafc",
-            )
+            tk.Label(form, text=label, fg="#e5e7eb", bg="#111827",
+                     font=("Arial", 10, "bold")).grid(row=row, column=0, sticky="w", pady=6)
+            entry = tk.Entry(form, width=58, show="*" if key == "tg_pass" else "",
+                             bg="#0c1220", fg="#f8fafc", insertbackground="#f8fafc")
             entry.insert(0, str(self.cfg.get(key, "")))
             entry.grid(row=row, column=1, padx=12, pady=6)
-
             self.entries[key] = entry
 
-        tk.Button(
-            form,
-            text="Guardar configuración",
-            command=self.save_tg_config,
-            bg="#f59e0b",
-            fg="#111827",
-            font=("Arial", 10, "bold"),
-        ).grid(row=len(fields), column=1, sticky="w", pady=12)
+        tk.Button(form, text="Guardar configuración", command=self.save_tg_config,
+                  bg="#f59e0b", fg="#111827", font=("Arial", 10, "bold")).grid(
+            row=len(fields), column=1, sticky="w", pady=12
+        )
 
-        tk.Button(
-            form,
-            text="Probar conexión TG",
-            command=self.test_tg_connection,
-            bg="#2563eb",
-            fg="white",
-            font=("Arial", 10, "bold"),
-        ).grid(row=len(fields), column=1, sticky="e", pady=12)
+        tk.Button(form, text="Probar conexión TG", command=self.test_tg_connection,
+                  bg="#2563eb", fg="white", font=("Arial", 10, "bold")).grid(
+            row=len(fields), column=1, sticky="e", pady=12
+        )
 
     def build_campaign_tab(self):
         top = tk.Frame(self.tab_campaign, bg="#111827", padx=20, pady=20)
@@ -378,82 +285,74 @@ class App:
 
         self.file_path = tk.StringVar()
 
-        tk.Button(
-            top,
-            text="Seleccionar Excel/CSV",
-            command=self.select_file,
-            bg="#2563eb",
-            fg="white",
-        ).grid(row=3, column=0, pady=8)
+        tk.Button(top, text="Seleccionar Excel/CSV", command=self.select_file,
+                  bg="#2563eb", fg="white").grid(row=3, column=0, pady=8)
 
-        tk.Label(
-            top,
-            textvariable=self.file_path,
-            fg="#cbd5e1",
-            bg="#111827",
-        ).grid(row=3, column=1, sticky="w")
+        tk.Label(top, textvariable=self.file_path, fg="#cbd5e1", bg="#111827").grid(row=3, column=1, sticky="w")
 
-        tk.Button(
-            top,
-            text="Crear campaña local",
-            command=self.create_campaign,
-            bg="#f59e0b",
-            fg="#111827",
-        ).grid(row=4, column=0, pady=10)
+        tk.Button(top, text="Crear campaña local", command=self.create_campaign,
+                  bg="#f59e0b", fg="#111827").grid(row=4, column=0, pady=10)
 
-        tk.Button(
-            top,
-            text="Iniciar envío",
-            command=self.start_sending,
-            bg="#22c55e",
-            fg="#111827",
-        ).grid(row=4, column=1, sticky="w", pady=10)
+        tk.Button(top, text="Iniciar envío", command=self.start_sending,
+                  bg="#22c55e", fg="#111827").grid(row=4, column=1, sticky="w", pady=10)
 
-        tk.Button(
-            top,
-            text="Pausar envío",
-            command=self.stop_sending,
-            bg="#ef4444",
-            fg="white",
-        ).grid(row=4, column=1, sticky="e", pady=10)
+        tk.Button(top, text="Pausar envío", command=self.stop_sending,
+                  bg="#ef4444", fg="white").grid(row=4, column=1, sticky="e", pady=10)
 
-        self.send_log = tk.Text(
-            self.tab_campaign,
-            height=16,
-            width=118,
-            bg="#030712",
-            fg="#e5e7eb",
-        )
+        self.send_log = tk.Text(self.tab_campaign, height=16, width=125, bg="#030712", fg="#e5e7eb")
         self.send_log.pack(padx=20, pady=10)
 
     def build_history_tab(self):
-        buttons = tk.Frame(self.tab_history, bg="#111827")
-        buttons.pack(anchor="w", padx=20, pady=12)
+        top = tk.Frame(self.tab_history, bg="#111827", padx=15, pady=15)
+        top.pack(fill="x")
 
-        tk.Button(
-            buttons,
-            text="Actualizar historial",
-            command=self.load_history,
-            bg="#2563eb",
-            fg="white",
-        ).pack(side="left", padx=5)
+        tk.Button(top, text="Actualizar historial", command=self.load_history,
+                  bg="#2563eb", fg="white").pack(side="left", padx=5)
 
-        tk.Button(
-            buttons,
-            text="Eliminar historial local",
-            command=self.delete_all_history,
-            bg="#ef4444",
-            fg="white",
-        ).pack(side="left", padx=5)
+        tk.Button(top, text="Ver campaña", command=self.view_selected_campaign,
+                  bg="#22c55e", fg="#111827").pack(side="left", padx=5)
 
-        self.history_text = tk.Text(
-            self.tab_history,
-            height=25,
-            width=118,
-            bg="#030712",
-            fg="#e5e7eb",
-        )
-        self.history_text.pack(padx=20, pady=10)
+        tk.Button(top, text="Eliminar campaña", command=self.delete_selected_campaign,
+                  bg="#ef4444", fg="white").pack(side="left", padx=5)
+
+        tk.Button(top, text="Eliminar todo", command=self.delete_all_history,
+                  bg="#991b1b", fg="white").pack(side="left", padx=5)
+
+        columns = ("id", "name", "chips", "total", "queued", "processing", "sent", "failed", "created")
+        self.history_tree = ttk.Treeview(self.tab_history, columns=columns, show="headings", height=18)
+
+        headers = {
+            "id": "ID",
+            "name": "Nombre",
+            "chips": "Chips",
+            "total": "Total",
+            "queued": "Cola",
+            "processing": "Procesando",
+            "sent": "Enviados",
+            "failed": "Fallidos",
+            "created": "Fecha",
+        }
+
+        widths = {
+            "id": 55,
+            "name": 160,
+            "chips": 90,
+            "total": 70,
+            "queued": 70,
+            "processing": 95,
+            "sent": 85,
+            "failed": 85,
+            "created": 180,
+        }
+
+        for col in columns:
+            self.history_tree.heading(col, text=headers[col])
+            self.history_tree.column(col, width=widths[col], anchor="center")
+
+        self.history_tree.pack(fill="both", expand=True, padx=15, pady=10)
+        self.history_tree.bind("<Double-1>", lambda event: self.view_selected_campaign())
+
+        self.load_history()
 
     def log_login(self, text):
         self.login_output.insert(tk.END, text + "\n")
@@ -465,20 +364,14 @@ class App:
 
     def try_restore_session(self):
         session = load_session()
-
         if session_is_valid(session):
             claims = session.get("claims", {})
             self.user_email = claims.get("email", "usuario")
             self.session = session
             self.authenticated = True
-
-            self.status.config(
-                text=f"Autenticado: {self.user_email} | {session_remaining_text(session)}",
-                fg="#22c55e",
-            )
-
+            self.status.config(text=f"Autenticado: {self.user_email} | {session_remaining_text(session)}",
+                               fg="#22c55e")
             self.log_login(f"Sesión restaurada: {self.user_email}")
-            self.log_login(f"Validez restante: {session_remaining_text(session)}")
             self.lock_tabs()
         else:
             clear_session()
@@ -489,7 +382,6 @@ class App:
         try:
             self.log_login("Abriendo acceso al sistema...")
             result = login()
-
             claims = result.get("claims", {})
             self.user_email = claims.get("email", "usuario")
             self.authenticated = True
@@ -503,14 +395,9 @@ class App:
             save_session(session)
             self.session = session
 
-            self.status.config(
-                text=f"Autenticado: {self.user_email} | {session_remaining_text(session)}",
-                fg="#22c55e",
-            )
-
+            self.status.config(text=f"Autenticado: {self.user_email} | {session_remaining_text(session)}",
+                               fg="#22c55e")
             self.log_login(f"LOGIN OK: {self.user_email}")
-            self.log_login(f"Sesión válida por {SESSION_MAX_HOURS} horas.")
-
             self.lock_tabs()
             self.notebook.select(self.tab_config)
 
@@ -524,6 +411,7 @@ class App:
         self.authenticated = False
         self.user_email = None
         self.session = None
+        self.running = False
         self.status.config(text="Estado: no autenticado", fg="#ef4444")
         self.lock_tabs()
         self.notebook.select(self.tab_login)
@@ -540,25 +428,18 @@ class App:
                 self.notebook.select(self.tab_login)
                 messagebox.showwarning("Sesión expirada", "Han pasado 24 horas. Debes iniciar sesión nuevamente.")
             else:
-                self.status.config(
-                    text=f"Autenticado: {self.user_email} | {session_remaining_text(self.session)}",
-                    fg="#22c55e",
-                )
-
+                self.status.config(text=f"Autenticado: {self.user_email} | {session_remaining_text(self.session)}",
+                                   fg="#22c55e")
         self.root.after(60000, self.check_session_timer)
 
     def save_tg_config(self):
         cfg = {}
-
         for key, entry in self.entries.items():
             value = entry.get().strip()
-
             if key == "tg_port":
                 value = int(value)
-
             if key == "poll_seconds":
                 value = float(value)
-
             cfg[key] = value
 
         save_config(cfg)
@@ -568,19 +449,15 @@ class App:
     def test_tg_connection(self):
         try:
             self.save_tg_config()
-
             tg = TG1600Client(
                 host=self.cfg["tg_host"],
                 port=self.cfg["tg_port"],
                 username=self.cfg["tg_user"],
                 password=self.cfg["tg_pass"],
             )
-
             tg.connect()
             tg.close()
-
             messagebox.showinfo("OK", "TG conectado correctamente")
-
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -597,10 +474,8 @@ class App:
 
         first_col = df.columns[0]
         phones = []
-
         for value in df[first_col].dropna().tolist():
             phones.append(normalize_phone(value))
-
         return phones
 
     def create_campaign(self):
@@ -625,7 +500,6 @@ class App:
                 "INSERT INTO campaigns (name, message, chips, created_at) VALUES (?, ?, ?, ?)",
                 (name, message, ",".join(str(c) for c in chips), created_at),
             )
-
             campaign_id = cur.lastrowid
 
             for index, phone in enumerate(phones):
@@ -645,6 +519,7 @@ class App:
             self.log_send(f"Campaña creada ID {campaign_id} con {len(phones)} contactos.")
             self.log_send(f"Round robin chips: {','.join(str(c) for c in chips)}")
             self.load_history()
+            self.notebook.select(self.tab_history)
 
         except Exception as e:
             messagebox.showerror("Error", str(e))
@@ -664,7 +539,6 @@ class App:
 
         self.save_tg_config()
         self.running = True
-
         self.worker = threading.Thread(target=self.send_loop, daemon=True)
         self.worker.start()
 
@@ -674,17 +548,14 @@ class App:
 
     def send_loop(self):
         tg = None
-
         try:
             self.log_send("Conectando al TG...")
-
             tg = TG1600Client(
                 host=self.cfg["tg_host"],
                 port=self.cfg["tg_port"],
                 username=self.cfg["tg_user"],
                 password=self.cfg["tg_pass"],
             )
-
             tg.connect()
             self.log_send("TG conectado correctamente.")
 
@@ -701,17 +572,13 @@ class App:
 
                 conn = sqlite3.connect(DB_FILE)
                 cur = conn.cursor()
-
-                cur.execute(
-                    """
+                cur.execute("""
                     SELECT id, phone, text, chip
                     FROM messages
                     WHERE status='queued'
                     ORDER BY id ASC
                     LIMIT 1
-                    """
-                )
-
+                """)
                 row = cur.fetchone()
 
                 if not row:
@@ -726,6 +593,7 @@ class App:
                 conn.commit()
                 conn.close()
 
+                self.root.after(0, self.load_history)
                 self.log_send(f"Enviando ID {msg_id} a {phone} por chip {chip}")
 
                 result = tg.send_sms(
@@ -740,20 +608,18 @@ class App:
 
                 conn = sqlite3.connect(DB_FILE)
                 cur = conn.cursor()
-                cur.execute(
-                    """
+                cur.execute("""
                     UPDATE messages
                     SET status=?, result=?, sent_at=?
                     WHERE id=?
-                    """,
-                    (status, result["raw"][:3000], sent_at, msg_id),
-                )
+                """, (status, result["raw"][:3000], sent_at, msg_id))
                 conn.commit()
                 conn.close()
 
                 self.log_send(
                     f"Resultado ID {msg_id}: {status} | chip web {result['requested_chip']} | TG {result['real_chip']}"
                 )
+                self.root.after(0, self.load_history)
 
                 time.sleep(poll_seconds)
 
@@ -775,30 +641,134 @@ class App:
 
         cur.execute("""
         SELECT c.id, c.name, c.chips, c.created_at,
-               COUNT(m.id),
-               SUM(CASE WHEN m.status='sent' THEN 1 ELSE 0 END),
-               SUM(CASE WHEN m.status='failed' THEN 1 ELSE 0 END),
-               SUM(CASE WHEN m.status='queued' THEN 1 ELSE 0 END),
-               SUM(CASE WHEN m.status='processing' THEN 1 ELSE 0 END)
+               COUNT(m.id) AS total,
+               SUM(CASE WHEN m.status='queued' THEN 1 ELSE 0 END) AS queued,
+               SUM(CASE WHEN m.status='processing' THEN 1 ELSE 0 END) AS processing,
+               SUM(CASE WHEN m.status='sent' THEN 1 ELSE 0 END) AS sent,
+               SUM(CASE WHEN m.status='failed' THEN 1 ELSE 0 END) AS failed
         FROM campaigns c
         LEFT JOIN messages m ON m.campaign_id = c.id
         GROUP BY c.id
         ORDER BY c.id DESC
         """)
-
         rows = cur.fetchall()
         conn.close()
 
-        self.history_text.delete("1.0", tk.END)
+        for item in self.history_tree.get_children():
+            self.history_tree.delete(item)
 
         for r in rows:
-            self.history_text.insert(
-                tk.END,
-                f"Campaña {r[0]} | {r[1]} | Chips {r[2]} | Total {r[4]} | Enviados {r[5] or 0} | Fallidos {r[6] or 0} | Cola {r[7] or 0} | Procesando {r[8] or 0} | {r[3]}\n",
-            )
+            self.history_tree.insert("", "end", values=(
+                r[0],
+                r[1],
+                r[2],
+                r[4] or 0,
+                r[5] or 0,
+                r[6] or 0,
+                r[7] or 0,
+                r[8] or 0,
+                r[3],
+            ))
+
+    def get_selected_campaign_id(self):
+        selected = self.history_tree.selection()
+        if not selected:
+            messagebox.showwarning("Selecciona campaña", "Selecciona una campaña primero.")
+            return None
+        values = self.history_tree.item(selected[0], "values")
+        return int(values[0])
+
+    def view_selected_campaign(self):
+        campaign_id = self.get_selected_campaign_id()
+        if not campaign_id:
+            return
+
+        conn = sqlite3.connect(DB_FILE)
+        cur = conn.cursor()
+
+        cur.execute("SELECT id, name, message, chips, created_at FROM campaigns WHERE id=?", (campaign_id,))
+        campaign = cur.fetchone()
+
+        cur.execute("""
+        SELECT id, phone, chip, status, created_at, sent_at, result
+        FROM messages
+        WHERE campaign_id=?
+        ORDER BY id DESC
+        """, (campaign_id,))
+        messages = cur.fetchall()
+        conn.close()
+
+        if not campaign:
+            messagebox.showerror("Error", "Campaña no encontrada.")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title(f"Resultados campaña {campaign_id}")
+        win.geometry("1100x650")
+        win.configure(bg="#0b1020")
+
+        tk.Label(win, text=campaign[1], font=("Arial", 20, "bold"),
+                 fg="#f8fafc", bg="#0b1020").pack(anchor="w", padx=15, pady=(15, 5))
+        tk.Label(win, text=f"Chips: {campaign[3]} | Fecha: {campaign[4]}",
+                 fg="#cbd5e1", bg="#0b1020").pack(anchor="w", padx=15)
+        tk.Label(win, text=f"Mensaje: {campaign[2]}",
+                 fg="#cbd5e1", bg="#0b1020").pack(anchor="w", padx=15, pady=(0, 10))
+
+        columns = ("id", "phone", "chip", "status", "created", "sent", "result")
+        tree = ttk.Treeview(win, columns=columns, show="headings", height=22)
+
+        headers = {
+            "id": "ID",
+            "phone": "Teléfono",
+            "chip": "Chip",
+            "status": "Estado",
+            "created": "Creado",
+            "sent": "Enviado",
+            "result": "Respuesta TG",
+        }
+
+        widths = {
+            "id": 55,
+            "phone": 150,
+            "chip": 70,
+            "status": 90,
+            "created": 160,
+            "sent": 160,
+            "result": 430,
+        }
+
+        for col in columns:
+            tree.heading(col, text=headers[col])
+            tree.column(col, width=widths[col], anchor="center")
+
+        tree.pack(fill="both", expand=True, padx=15, pady=10)
+
+        for m in messages:
+            result_short = (m[6] or "").replace("\r", " ").replace("\n", " ")
+            if len(result_short) > 160:
+                result_short = result_short[:160] + "..."
+            tree.insert("", "end", values=(m[0], m[1], m[2], m[3], m[4], m[5] or "", result_short))
+
+    def delete_selected_campaign(self):
+        campaign_id = self.get_selected_campaign_id()
+        if not campaign_id:
+            return
+
+        if not messagebox.askyesno("Confirmar", f"¿Eliminar campaña {campaign_id} y todos sus SMS?"):
+            return
+
+        conn = sqlite3.connect(DB_FILE)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM messages WHERE campaign_id=?", (campaign_id,))
+        cur.execute("DELETE FROM campaigns WHERE id=?", (campaign_id,))
+        conn.commit()
+        conn.close()
+
+        self.load_history()
+        messagebox.showinfo("OK", "Campaña eliminada.")
 
     def delete_all_history(self):
-        if not messagebox.askyesno("Confirmar", "¿Eliminar todo el historial local?"):
+        if not messagebox.askyesno("Confirmar", "¿Eliminar TODO el historial local?"):
             return
 
         conn = sqlite3.connect(DB_FILE)
@@ -809,7 +779,7 @@ class App:
         conn.close()
 
         self.load_history()
-        messagebox.showinfo("OK", "Historial eliminado")
+        messagebox.showinfo("OK", "Historial eliminado.")
 
 
 if __name__ == "__main__":
