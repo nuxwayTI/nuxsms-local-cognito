@@ -127,6 +127,7 @@ def decode_token(token):
         algorithms=["RS256"],
         audience=APP_CLIENT_ID,
         issuer=issuer,
+        leeway=300,
     )
 
 
