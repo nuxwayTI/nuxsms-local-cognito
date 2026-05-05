@@ -9,6 +9,9 @@ from tkinter import filedialog, messagebox, ttk
 
 import pandas as pd
 from PIL import Image, ImageTk
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 from auth import login
 from tg1600 import TG1600Client
@@ -105,10 +108,21 @@ def parse_chips(chips_raw):
     for item in chips_raw.split(","):
         item = item.strip()
         if item:
-            chips.append(int(item))
+            chip = int(item)
+            if chip < 1 or chip > 32:
+                raise ValueError("Chip fuera de rango.")
+            chips.append(chip)
     if not chips:
         raise ValueError("Debes ingresar al menos un chip.")
     return chips
+
+
+def safe_filename(text):
+    cleaned = "".join(c for c in str(text) if c.isalnum() or c in (" ", "_", "-")).strip()
+    cleaned = cleaned.replace(" ", "_")
+    if not cleaned:
+        cleaned = "campana"
+    return cleaned[:60]
 
 
 def init_db():
@@ -149,7 +163,7 @@ class App:
 
         self.root = root
         self.root.title("NuxSMS Local")
-        self.root.geometry("1100x760")
+        self.root.geometry("1120x780")
         self.root.configure(bg="#0b1020")
 
         self.authenticated = False
@@ -182,13 +196,29 @@ class App:
         title_box = tk.Frame(header, bg="#0b1020")
         title_box.pack(side="left")
 
-        tk.Label(title_box, text="NUXSMS LOCAL", font=("Arial", 26, "bold"),
-                 fg="#f8fafc", bg="#0b1020").pack(anchor="w")
-        tk.Label(title_box, text="Acceso local + TG Series Gateway", font=("Arial", 12),
-                 fg="#cbd5e1", bg="#0b1020").pack(anchor="w")
+        tk.Label(
+            title_box,
+            text="NUXSMS LOCAL",
+            font=("Arial", 26, "bold"),
+            fg="#f8fafc",
+            bg="#0b1020",
+        ).pack(anchor="w")
 
-        self.status = tk.Label(self.root, text="Estado: no autenticado",
-                               fg="#ef4444", bg="#0b1020", font=("Arial", 12, "bold"))
+        tk.Label(
+            title_box,
+            text="Acceso local + TG Series Gateway",
+            font=("Arial", 12),
+            fg="#cbd5e1",
+            bg="#0b1020",
+        ).pack(anchor="w")
+
+        self.status = tk.Label(
+            self.root,
+            text="Estado: no autenticado",
+            fg="#ef4444",
+            bg="#0b1020",
+            font=("Arial", 12, "bold"),
+        )
         self.status.pack(pady=4)
 
         self.notebook = ttk.Notebook(self.root)
@@ -219,18 +249,43 @@ class App:
         self.notebook.tab(3, state=state)
 
     def build_login_tab(self):
-        tk.Label(self.tab_login, text="Acceso al sistema", font=("Arial", 22, "bold"),
-                 fg="#f8fafc", bg="#111827").pack(pady=32)
+        tk.Label(
+            self.tab_login,
+            text="Acceso al sistema",
+            font=("Arial", 22, "bold"),
+            fg="#f8fafc",
+            bg="#111827",
+        ).pack(pady=32)
 
-        tk.Button(self.tab_login, text="Iniciar sesión", command=self.do_login,
-                  bg="#f59e0b", fg="#111827", font=("Arial", 12, "bold"),
-                  padx=20, pady=8).pack(pady=8)
+        tk.Button(
+            self.tab_login,
+            text="Iniciar sesión",
+            command=self.do_login,
+            bg="#f59e0b",
+            fg="#111827",
+            font=("Arial", 12, "bold"),
+            padx=20,
+            pady=8,
+        ).pack(pady=8)
 
-        tk.Button(self.tab_login, text="Cerrar sesión local", command=self.do_logout,
-                  bg="#2563eb", fg="white", font=("Arial", 11, "bold"),
-                  padx=18, pady=7).pack(pady=5)
+        tk.Button(
+            self.tab_login,
+            text="Cerrar sesión local",
+            command=self.do_logout,
+            bg="#2563eb",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=18,
+            pady=7,
+        ).pack(pady=5)
 
-        self.login_output = tk.Text(self.tab_login, height=12, width=110, bg="#030712", fg="#e5e7eb")
+        self.login_output = tk.Text(
+            self.tab_login,
+            height=12,
+            width=110,
+            bg="#030712",
+            fg="#e5e7eb",
+        )
         self.login_output.pack(pady=20)
 
     def build_config_tab(self):
@@ -248,23 +303,43 @@ class App:
         ]
 
         for row, (key, label) in enumerate(fields):
-            tk.Label(form, text=label, fg="#e5e7eb", bg="#111827",
-                     font=("Arial", 10, "bold")).grid(row=row, column=0, sticky="w", pady=6)
-            entry = tk.Entry(form, width=58, show="*" if key == "tg_pass" else "",
-                             bg="#0c1220", fg="#f8fafc", insertbackground="#f8fafc")
+            tk.Label(
+                form,
+                text=label,
+                fg="#e5e7eb",
+                bg="#111827",
+                font=("Arial", 10, "bold"),
+            ).grid(row=row, column=0, sticky="w", pady=6)
+
+            entry = tk.Entry(
+                form,
+                width=58,
+                show="*" if key == "tg_pass" else "",
+                bg="#0c1220",
+                fg="#f8fafc",
+                insertbackground="#f8fafc",
+            )
             entry.insert(0, str(self.cfg.get(key, "")))
             entry.grid(row=row, column=1, padx=12, pady=6)
             self.entries[key] = entry
 
-        tk.Button(form, text="Guardar configuración", command=self.save_tg_config,
-                  bg="#f59e0b", fg="#111827", font=("Arial", 10, "bold")).grid(
-            row=len(fields), column=1, sticky="w", pady=12
-        )
+        tk.Button(
+            form,
+            text="Guardar configuración",
+            command=self.save_tg_config,
+            bg="#f59e0b",
+            fg="#111827",
+            font=("Arial", 10, "bold"),
+        ).grid(row=len(fields), column=1, sticky="w", pady=12)
 
-        tk.Button(form, text="Probar conexión TG", command=self.test_tg_connection,
-                  bg="#2563eb", fg="white", font=("Arial", 10, "bold")).grid(
-            row=len(fields), column=1, sticky="e", pady=12
-        )
+        tk.Button(
+            form,
+            text="Probar conexión TG",
+            command=self.test_tg_connection,
+            bg="#2563eb",
+            fg="white",
+            font=("Arial", 10, "bold"),
+        ).grid(row=len(fields), column=1, sticky="e", pady=12)
 
     def build_campaign_tab(self):
         top = tk.Frame(self.tab_campaign, bg="#111827", padx=20, pady=20)
@@ -285,38 +360,97 @@ class App:
 
         self.file_path = tk.StringVar()
 
-        tk.Button(top, text="Seleccionar Excel/CSV", command=self.select_file,
-                  bg="#2563eb", fg="white").grid(row=3, column=0, pady=8)
+        tk.Button(
+            top,
+            text="Seleccionar Excel/CSV",
+            command=self.select_file,
+            bg="#2563eb",
+            fg="white",
+        ).grid(row=3, column=0, pady=8)
 
-        tk.Label(top, textvariable=self.file_path, fg="#cbd5e1", bg="#111827").grid(row=3, column=1, sticky="w")
+        tk.Label(
+            top,
+            textvariable=self.file_path,
+            fg="#cbd5e1",
+            bg="#111827",
+        ).grid(row=3, column=1, sticky="w")
 
-        tk.Button(top, text="Crear campaña local", command=self.create_campaign,
-                  bg="#f59e0b", fg="#111827").grid(row=4, column=0, pady=10)
+        tk.Button(
+            top,
+            text="Crear campaña local",
+            command=self.create_campaign,
+            bg="#f59e0b",
+            fg="#111827",
+        ).grid(row=4, column=0, pady=10)
 
-        tk.Button(top, text="Iniciar envío", command=self.start_sending,
-                  bg="#22c55e", fg="#111827").grid(row=4, column=1, sticky="w", pady=10)
+        tk.Button(
+            top,
+            text="Iniciar envío",
+            command=self.start_sending,
+            bg="#22c55e",
+            fg="#111827",
+        ).grid(row=4, column=1, sticky="w", pady=10)
 
-        tk.Button(top, text="Pausar envío", command=self.stop_sending,
-                  bg="#ef4444", fg="white").grid(row=4, column=1, sticky="e", pady=10)
+        tk.Button(
+            top,
+            text="Pausar envío",
+            command=self.stop_sending,
+            bg="#ef4444",
+            fg="white",
+        ).grid(row=4, column=1, sticky="e", pady=10)
 
-        self.send_log = tk.Text(self.tab_campaign, height=16, width=125, bg="#030712", fg="#e5e7eb")
+        self.send_log = tk.Text(
+            self.tab_campaign,
+            height=16,
+            width=125,
+            bg="#030712",
+            fg="#e5e7eb",
+        )
         self.send_log.pack(padx=20, pady=10)
 
     def build_history_tab(self):
         top = tk.Frame(self.tab_history, bg="#111827", padx=15, pady=15)
         top.pack(fill="x")
 
-        tk.Button(top, text="Actualizar historial", command=self.load_history,
-                  bg="#2563eb", fg="white").pack(side="left", padx=5)
+        tk.Button(
+            top,
+            text="Actualizar historial",
+            command=self.load_history,
+            bg="#2563eb",
+            fg="white",
+        ).pack(side="left", padx=5)
 
-        tk.Button(top, text="Ver campaña", command=self.view_selected_campaign,
-                  bg="#22c55e", fg="#111827").pack(side="left", padx=5)
+        tk.Button(
+            top,
+            text="Ver campaña",
+            command=self.view_selected_campaign,
+            bg="#22c55e",
+            fg="#111827",
+        ).pack(side="left", padx=5)
 
-        tk.Button(top, text="Eliminar campaña", command=self.delete_selected_campaign,
-                  bg="#ef4444", fg="white").pack(side="left", padx=5)
+        tk.Button(
+            top,
+            text="Exportar campaña Excel",
+            command=self.export_selected_campaign,
+            bg="#f59e0b",
+            fg="#111827",
+        ).pack(side="left", padx=5)
 
-        tk.Button(top, text="Eliminar todo", command=self.delete_all_history,
-                  bg="#991b1b", fg="white").pack(side="left", padx=5)
+        tk.Button(
+            top,
+            text="Eliminar campaña",
+            command=self.delete_selected_campaign,
+            bg="#ef4444",
+            fg="white",
+        ).pack(side="left", padx=5)
+
+        tk.Button(
+            top,
+            text="Eliminar todo",
+            command=self.delete_all_history,
+            bg="#991b1b",
+            fg="white",
+        ).pack(side="left", padx=5)
 
         columns = ("id", "name", "chips", "total", "queued", "processing", "sent", "failed", "created")
         self.history_tree = ttk.Treeview(self.tab_history, columns=columns, show="headings", height=18)
@@ -369,8 +503,10 @@ class App:
             self.user_email = claims.get("email", "usuario")
             self.session = session
             self.authenticated = True
-            self.status.config(text=f"Autenticado: {self.user_email} | {session_remaining_text(session)}",
-                               fg="#22c55e")
+            self.status.config(
+                text=f"Autenticado: {self.user_email} | {session_remaining_text(session)}",
+                fg="#22c55e",
+            )
             self.log_login(f"Sesión restaurada: {self.user_email}")
             self.lock_tabs()
         else:
@@ -395,8 +531,10 @@ class App:
             save_session(session)
             self.session = session
 
-            self.status.config(text=f"Autenticado: {self.user_email} | {session_remaining_text(session)}",
-                               fg="#22c55e")
+            self.status.config(
+                text=f"Autenticado: {self.user_email} | {session_remaining_text(session)}",
+                fg="#22c55e",
+            )
             self.log_login(f"LOGIN OK: {self.user_email}")
             self.lock_tabs()
             self.notebook.select(self.tab_config)
@@ -428,8 +566,10 @@ class App:
                 self.notebook.select(self.tab_login)
                 messagebox.showwarning("Sesión expirada", "Han pasado 24 horas. Debes iniciar sesión nuevamente.")
             else:
-                self.status.config(text=f"Autenticado: {self.user_email} | {session_remaining_text(self.session)}",
-                                   fg="#22c55e")
+                self.status.config(
+                    text=f"Autenticado: {self.user_email} | {session_remaining_text(self.session)}",
+                    fg="#22c55e",
+                )
         self.root.after(60000, self.check_session_timer)
 
     def save_tg_config(self):
@@ -678,11 +818,7 @@ class App:
         values = self.history_tree.item(selected[0], "values")
         return int(values[0])
 
-    def view_selected_campaign(self):
-        campaign_id = self.get_selected_campaign_id()
-        if not campaign_id:
-            return
-
+    def get_campaign_data(self, campaign_id):
         conn = sqlite3.connect(DB_FILE)
         cur = conn.cursor()
 
@@ -693,10 +829,19 @@ class App:
         SELECT id, phone, chip, status, created_at, sent_at, result
         FROM messages
         WHERE campaign_id=?
-        ORDER BY id DESC
+        ORDER BY id ASC
         """, (campaign_id,))
         messages = cur.fetchall()
+
         conn.close()
+        return campaign, messages
+
+    def view_selected_campaign(self):
+        campaign_id = self.get_selected_campaign_id()
+        if not campaign_id:
+            return
+
+        campaign, messages = self.get_campaign_data(campaign_id)
 
         if not campaign:
             messagebox.showerror("Error", "Campaña no encontrada.")
@@ -704,15 +849,28 @@ class App:
 
         win = tk.Toplevel(self.root)
         win.title(f"Resultados campaña {campaign_id}")
-        win.geometry("1100x650")
+        win.geometry("1120x680")
         win.configure(bg="#0b1020")
 
-        tk.Label(win, text=campaign[1], font=("Arial", 20, "bold"),
-                 fg="#f8fafc", bg="#0b1020").pack(anchor="w", padx=15, pady=(15, 5))
-        tk.Label(win, text=f"Chips: {campaign[3]} | Fecha: {campaign[4]}",
-                 fg="#cbd5e1", bg="#0b1020").pack(anchor="w", padx=15)
-        tk.Label(win, text=f"Mensaje: {campaign[2]}",
-                 fg="#cbd5e1", bg="#0b1020").pack(anchor="w", padx=15, pady=(0, 10))
+        header = tk.Frame(win, bg="#0b1020")
+        header.pack(fill="x", padx=15, pady=12)
+
+        tk.Label(header, text=campaign[1], font=("Arial", 20, "bold"),
+                 fg="#f8fafc", bg="#0b1020").pack(anchor="w")
+
+        tk.Label(header, text=f"Chips: {campaign[3]} | Fecha: {campaign[4]}",
+                 fg="#cbd5e1", bg="#0b1020").pack(anchor="w")
+
+        tk.Label(header, text=f"Mensaje: {campaign[2]}",
+                 fg="#cbd5e1", bg="#0b1020").pack(anchor="w", pady=(0, 8))
+
+        tk.Button(
+            header,
+            text="Exportar Excel",
+            command=lambda: self.export_campaign_by_id(campaign_id),
+            bg="#f59e0b",
+            fg="#111827",
+        ).pack(anchor="w", pady=5)
 
         columns = ("id", "phone", "chip", "status", "created", "sent", "result")
         tree = ttk.Treeview(win, columns=columns, show="headings", height=22)
@@ -734,7 +892,7 @@ class App:
             "status": 90,
             "created": 160,
             "sent": 160,
-            "result": 430,
+            "result": 450,
         }
 
         for col in columns:
@@ -745,9 +903,129 @@ class App:
 
         for m in messages:
             result_short = (m[6] or "").replace("\r", " ").replace("\n", " ")
-            if len(result_short) > 160:
-                result_short = result_short[:160] + "..."
+            if len(result_short) > 170:
+                result_short = result_short[:170] + "..."
             tree.insert("", "end", values=(m[0], m[1], m[2], m[3], m[4], m[5] or "", result_short))
+
+    def export_selected_campaign(self):
+        campaign_id = self.get_selected_campaign_id()
+        if not campaign_id:
+            return
+        self.export_campaign_by_id(campaign_id)
+
+    def export_campaign_by_id(self, campaign_id):
+        campaign, messages = self.get_campaign_data(campaign_id)
+
+        if not campaign:
+            messagebox.showerror("Error", "Campaña no encontrada.")
+            return
+
+        default_name = f"reporte_campana_{campaign[0]}_{safe_filename(campaign[1])}.xlsx"
+
+        path = filedialog.asksaveasfilename(
+            title="Guardar reporte Excel",
+            defaultextension=".xlsx",
+            initialfile=default_name,
+            filetypes=[("Excel", "*.xlsx")],
+        )
+
+        if not path:
+            return
+
+        wb = Workbook()
+
+        ws_summary = wb.active
+        ws_summary.title = "Resumen"
+
+        total = len(messages)
+        sent = sum(1 for m in messages if m[3] == "sent")
+        failed = sum(1 for m in messages if m[3] == "failed")
+        queued = sum(1 for m in messages if m[3] == "queued")
+        processing = sum(1 for m in messages if m[3] == "processing")
+
+        ws_summary["A1"] = "Reporte NuxSMS"
+        ws_summary["A1"].font = Font(size=18, bold=True)
+
+        summary_rows = [
+            ("ID campaña", campaign[0]),
+            ("Nombre", campaign[1]),
+            ("Mensaje", campaign[2]),
+            ("Chips", campaign[3]),
+            ("Fecha creación", campaign[4]),
+            ("Total", total),
+            ("Enviados", sent),
+            ("Fallidos", failed),
+            ("Cola", queued),
+            ("Procesando", processing),
+            ("Exportado", time.strftime("%Y-%m-%d %H:%M:%S")),
+        ]
+
+        row_index = 3
+        for label, value in summary_rows:
+            ws_summary.cell(row=row_index, column=1, value=label)
+            ws_summary.cell(row=row_index, column=2, value=value)
+            ws_summary.cell(row=row_index, column=1).font = Font(bold=True)
+            row_index += 1
+
+        ws_summary.column_dimensions["A"].width = 22
+        ws_summary.column_dimensions["B"].width = 70
+
+        ws = wb.create_sheet("Mensajes")
+
+        headers = [
+            "ID",
+            "Teléfono",
+            "Chip",
+            "Estado",
+            "Creado",
+            "Enviado",
+            "Respuesta TG",
+        ]
+
+        ws.append(headers)
+
+        header_fill = PatternFill("solid", fgColor="1F2937")
+        header_font = Font(color="FFFFFF", bold=True)
+
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center")
+
+        for m in messages:
+            ws.append([
+                m[0],
+                m[1],
+                m[2],
+                m[3],
+                m[4],
+                m[5] or "",
+                m[6] or "",
+            ])
+
+        status_col = 4
+        for row in range(2, ws.max_row + 1):
+            status = ws.cell(row=row, column=status_col).value
+            if status == "sent":
+                ws.cell(row=row, column=status_col).fill = PatternFill("solid", fgColor="22C55E")
+            elif status == "failed":
+                ws.cell(row=row, column=status_col).fill = PatternFill("solid", fgColor="EF4444")
+            elif status == "queued":
+                ws.cell(row=row, column=status_col).fill = PatternFill("solid", fgColor="F59E0B")
+            elif status == "processing":
+                ws.cell(row=row, column=status_col).fill = PatternFill("solid", fgColor="38BDF8")
+
+        widths = [10, 18, 10, 14, 22, 22, 90]
+        for i, width in enumerate(widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = width
+
+        ws.freeze_panes = "A2"
+
+        try:
+            wb.save(path)
+            messagebox.showinfo("Exportado", f"Reporte generado correctamente:\n{path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar el Excel:\n{e}")
 
     def delete_selected_campaign(self):
         campaign_id = self.get_selected_campaign_id()
