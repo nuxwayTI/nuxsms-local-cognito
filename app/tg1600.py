@@ -85,3 +85,4 @@ class TG1600Client:
     def close(self):
         if self.sock:
             self.sock.close()
+
