@@ -227,17 +227,23 @@ class App:
         self.tab_login = tk.Frame(self.notebook, bg="#111827")
         self.tab_config = tk.Frame(self.notebook, bg="#111827")
         self.tab_campaign = tk.Frame(self.notebook, bg="#111827")
+        self.tab_single = tk.Frame(self.notebook, bg="#111827")
         self.tab_history = tk.Frame(self.notebook, bg="#111827")
+        self.tab_help = tk.Frame(self.notebook, bg="#111827")
 
         self.notebook.add(self.tab_login, text="Login")
         self.notebook.add(self.tab_config, text="Configuración TG")
         self.notebook.add(self.tab_campaign, text="Lanzador SMS")
+        self.notebook.add(self.tab_single, text="SMS individual")
         self.notebook.add(self.tab_history, text="Historial")
+        self.notebook.add(self.tab_help, text="Manual / Ayuda")
 
         self.build_login_tab()
         self.build_config_tab()
         self.build_campaign_tab()
+        self.build_single_sms_tab()
         self.build_history_tab()
+        self.build_help_tab()
 
         self.lock_tabs()
         self.root.after(60000, self.check_session_timer)
@@ -247,6 +253,8 @@ class App:
         self.notebook.tab(1, state=state)
         self.notebook.tab(2, state=state)
         self.notebook.tab(3, state=state)
+        self.notebook.tab(4, state=state)
+        self.notebook.tab(5, state=state)
 
     def build_login_tab(self):
         tk.Label(
@@ -407,6 +415,168 @@ class App:
             fg="#e5e7eb",
         )
         self.send_log.pack(padx=20, pady=10)
+
+    def build_single_sms_tab(self):
+        top = tk.Frame(self.tab_single, bg="#111827", padx=20, pady=20)
+        top.pack(fill="x", anchor="nw")
+
+        tk.Label(
+            top,
+            text="Enviar SMS individual",
+            font=("Arial", 20, "bold"),
+            fg="#f8fafc",
+            bg="#111827",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 18))
+
+        tk.Label(top, text="Número", fg="#e5e7eb", bg="#111827").grid(row=1, column=0, sticky="w")
+        self.single_phone = tk.Entry(top, width=58, bg="#0c1220", fg="#f8fafc")
+        self.single_phone.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+
+        tk.Label(top, text="Mensaje", fg="#e5e7eb", bg="#111827").grid(row=2, column=0, sticky="nw")
+        self.single_message = tk.Text(top, width=58, height=5, bg="#0c1220", fg="#f8fafc")
+        self.single_message.grid(row=2, column=1, padx=10, pady=5, sticky="w")
+
+        tk.Label(top, text="Chip", fg="#e5e7eb", bg="#111827").grid(row=3, column=0, sticky="w")
+        self.single_chip = tk.Entry(top, width=58, bg="#0c1220", fg="#f8fafc")
+        self.single_chip.insert(0, "2")
+        self.single_chip.grid(row=3, column=1, padx=10, pady=5, sticky="w")
+
+        tk.Button(
+            top,
+            text="Enviar SMS ahora",
+            command=self.send_single_sms,
+            bg="#22c55e",
+            fg="#111827",
+            font=("Arial", 10, "bold"),
+        ).grid(row=4, column=1, sticky="w", padx=10, pady=12)
+
+        self.single_log = tk.Text(
+            self.tab_single,
+            height=14,
+            width=125,
+            bg="#030712",
+            fg="#e5e7eb",
+        )
+        self.single_log.pack(padx=20, pady=10)
+
+    def build_help_tab(self):
+        help_text = """NUXSMS LOCAL - MANUAL RÁPIDO
+
+1. Login
+- Inicia sesión con el usuario autorizado por Nuxway Technology.
+- La sesión local dura 24 horas.
+
+2. Configuración TG
+- Coloca IP, puerto, usuario y password del gateway TG1600.
+- Usa Probar conexión TG antes de enviar.
+
+3. Lanzador SMS por Excel/CSV
+- El archivo debe tener los teléfonos en la primera columna.
+- Completa nombre de campaña, mensaje y chips. Ejemplo: 2,3,4.
+- El sistema reparte los SMS en round-robin entre los chips indicados.
+- Si un envío falla, se reintenta automáticamente una sola vez.
+
+4. SMS individual
+- Ingresa número, mensaje y chip.
+- El sistema normaliza números bolivianos agregando +591 si corresponde.
+- Si falla el primer intento, reintenta una sola vez.
+
+5. Historial
+- Muestra campañas, enviados, fallidos y pendientes.
+- Puedes ver el detalle de una campaña o exportarla a Excel.
+
+Recomendación
+- No abras el Excel exportado mientras generas otro reporte.
+- Si el gateway no responde, revisa red, credenciales y chip activo."""
+
+        tk.Label(
+            self.tab_help,
+            text="Manual / Ayuda",
+            font=("Arial", 22, "bold"),
+            fg="#f8fafc",
+            bg="#111827",
+        ).pack(anchor="w", padx=20, pady=(24, 8))
+
+        box = tk.Text(
+            self.tab_help,
+            height=28,
+            width=120,
+            bg="#030712",
+            fg="#e5e7eb",
+            wrap="word",
+        )
+        box.pack(fill="both", expand=True, padx=20, pady=12)
+        box.insert(tk.END, help_text)
+        box.config(state="disabled")
+
+    def send_single_sms(self):
+        if not session_is_valid(self.session):
+            messagebox.showwarning("Sesión expirada", "Debes iniciar sesión antes de enviar.")
+            return
+
+        try:
+            self.save_tg_config()
+            phone = normalize_phone(self.single_phone.get())
+            message = self.single_message.get("1.0", tk.END).strip()
+            chip = int(self.single_chip.get().strip())
+
+            if not phone or not message:
+                raise Exception("Completa número y mensaje.")
+            if chip < 1 or chip > 32:
+                raise Exception("Chip fuera de rango. Usa 1 a 32.")
+
+            thread = threading.Thread(
+                target=self.send_single_sms_worker,
+                args=(phone, message, chip),
+                daemon=True,
+            )
+            thread.start()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def log_single(self, text):
+        self.single_log.insert(tk.END, text + "\n")
+        self.single_log.see(tk.END)
+
+    def send_sms_with_one_retry(self, tg, chip, phone, text, message_id):
+        first = tg.send_sms(chip=chip, to_number=phone, message=text, message_id=message_id)
+        if first.get("success"):
+            first["attempts"] = 1
+            return first
+
+        time.sleep(1)
+        second = tg.send_sms(chip=chip, to_number=phone, message=text, message_id=f"{message_id}_retry")
+        second["attempts"] = 2
+        second["first_raw"] = first.get("raw", "")
+        return second
+
+    def send_single_sms_worker(self, phone, message, chip):
+        tg = None
+        try:
+            self.root.after(0, self.log_single, f"Conectando al TG para enviar a {phone} por chip {chip}...")
+            tg = TG1600Client(
+                host=self.cfg["tg_host"],
+                port=self.cfg["tg_port"],
+                username=self.cfg["tg_user"],
+                password=self.cfg["tg_pass"],
+            )
+            tg.connect()
+            result = self.send_sms_with_one_retry(tg, chip, phone, message, f"single_{int(time.time())}")
+            status = "ENVIADO" if result.get("success") else "FALLIDO"
+            self.root.after(
+                0,
+                self.log_single,
+                f"Resultado: {status} | intentos: {result.get('attempts', 1)} | chip {result.get('real_chip', chip)}",
+            )
+            self.root.after(0, self.log_single, (result.get("raw") or "")[:1200])
+        except Exception as e:
+            self.root.after(0, self.log_single, "ERROR: " + str(e))
+        finally:
+            if tg:
+                try:
+                    tg.close()
+                except Exception:
+                    pass
 
     def build_history_tab(self):
         top = tk.Frame(self.tab_history, bg="#111827", padx=15, pady=15)
@@ -736,10 +906,11 @@ class App:
                 self.root.after(0, self.load_history)
                 self.log_send(f"Enviando ID {msg_id} a {phone} por chip {chip}")
 
-                result = tg.send_sms(
+                result = self.send_sms_with_one_retry(
+                    tg=tg,
                     chip=chip,
-                    to_number=phone,
-                    message=text,
+                    phone=phone,
+                    text=text,
                     message_id=msg_id,
                 )
 
@@ -757,7 +928,7 @@ class App:
                 conn.close()
 
                 self.log_send(
-                    f"Resultado ID {msg_id}: {status} | chip web {result['requested_chip']} | TG {result['real_chip']}"
+                    f"Resultado ID {msg_id}: {status} | intentos {result.get('attempts', 1)} | chip web {result['requested_chip']} | TG {result['real_chip']}"
                 )
                 self.root.after(0, self.load_history)
 
