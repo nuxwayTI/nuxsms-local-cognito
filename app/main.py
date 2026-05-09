@@ -21,6 +21,9 @@ SESSION_FILE = "session.json"
 DB_FILE = "nuxsms_local.db"
 COUNTRY_CODE = "591"
 SESSION_MAX_HOURS = 24
+# Para pruebas puedes cambiar a 120 segundos.
+# Para produccion usa: SESSION_TEST_SECONDS = None
+SESSION_TEST_SECONDS = 120
 
 
 def resource_path(relative_path):
@@ -78,18 +81,23 @@ def session_is_valid(session):
     login_time = session.get("login_time")
     if not login_time:
         return False
-    return (time.time() - float(login_time)) < (SESSION_MAX_HOURS * 3600)
+    max_seconds = SESSION_TEST_SECONDS if SESSION_TEST_SECONDS is not None else (SESSION_MAX_HOURS * 3600)
+    return (time.time() - float(login_time)) < max_seconds
 
 
 def session_remaining_text(session):
     if not session or not session.get("login_time"):
         return "0h"
-    remaining = (SESSION_MAX_HOURS * 3600) - (time.time() - float(session["login_time"]))
+    max_seconds = SESSION_TEST_SECONDS if SESSION_TEST_SECONDS is not None else (SESSION_MAX_HOURS * 3600)
+    remaining = max_seconds - (time.time() - float(session["login_time"]))
     if remaining <= 0:
         return "expirada"
     h = int(remaining // 3600)
     m = int((remaining % 3600) // 60)
-    return f"{h}h {m}m"
+    s = int(remaining % 60)
+    if h > 0:
+        return f"{h}h {m}m"
+    return f"{m}m {s}s"
 
 
 def normalize_phone(phone):
@@ -175,6 +183,7 @@ class App:
         self.logo_img = None
 
         self.setup_ui()
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.try_restore_session()
 
     def setup_ui(self):
@@ -246,7 +255,7 @@ class App:
         self.build_help_tab()
 
         self.lock_tabs()
-        self.root.after(60000, self.check_session_timer)
+        self.root.after(1000 if SESSION_TEST_SECONDS is not None else 60000, self.check_session_timer)
 
     def lock_tabs(self):
         state = "normal" if self.authenticated else "disabled"
@@ -714,7 +723,7 @@ Recomendación
             self.log_login("ERROR: " + str(e))
             messagebox.showerror("Error", str(e))
 
-    def do_logout(self):
+    def logout_local(self):
         clear_session()
         self.authenticated = False
         self.user_email = None
@@ -723,7 +732,25 @@ Recomendación
         self.status.config(text="Estado: no autenticado", fg="#ef4444")
         self.lock_tabs()
         self.notebook.select(self.tab_login)
+
+    def do_logout(self):
+        self.logout_local()
         self.log_login("Sesión local cerrada.")
+
+    def on_close(self):
+        if self.authenticated:
+            confirm = messagebox.askyesno(
+                "Cerrar NUXSMS",
+                "¿Quieres salir de NUXSMS?\n\nSe cerrará la sesión local y tendrás que iniciar sesión nuevamente al abrir el sistema.",
+            )
+            if not confirm:
+                return
+            self.logout_local()
+        else:
+            confirm = messagebox.askyesno("Cerrar NUXSMS", "¿Quieres salir de NUXSMS?")
+            if not confirm:
+                return
+        self.root.destroy()
 
     def check_session_timer(self):
         if self.authenticated:
@@ -734,13 +761,16 @@ Recomendación
                 self.status.config(text="Sesión expirada. Inicia sesión otra vez.", fg="#ef4444")
                 self.lock_tabs()
                 self.notebook.select(self.tab_login)
-                messagebox.showwarning("Sesión expirada", "Han pasado 24 horas. Debes iniciar sesión nuevamente.")
+                msg = "La sesión expiró. Debes iniciar sesión nuevamente."
+                if SESSION_TEST_SECONDS is None:
+                    msg = "Han pasado 24 horas. Debes iniciar sesión nuevamente."
+                messagebox.showwarning("Sesión expirada", msg)
             else:
                 self.status.config(
                     text=f"Autenticado: {self.user_email} | {session_remaining_text(self.session)}",
                     fg="#22c55e",
                 )
-        self.root.after(60000, self.check_session_timer)
+        self.root.after(1000 if SESSION_TEST_SECONDS is not None else 60000, self.check_session_timer)
 
     def save_tg_config(self):
         cfg = {}
