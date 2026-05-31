@@ -481,12 +481,12 @@ class App:
 - El archivo debe tener los teléfonos en la primera columna.
 - Completa nombre de campaña, mensaje y chips. Ejemplo: 2,3,4.
 - El sistema reparte los SMS en round-robin entre los chips indicados.
-- Si un envío falla, se reintenta automáticamente una sola vez.
+- Si un envío falla, se marca como fallido. No realiza reintento automático.
 
 4. SMS individual
 - Ingresa número, mensaje y chip.
 - El sistema normaliza números bolivianos agregando +591 si corresponde.
-- Si falla el primer intento, reintenta una sola vez.
+- Si falla el envío, se marca como fallido. No realiza reintento automático.
 
 5. Historial
 - Muestra campañas, enviados, fallidos y pendientes.
@@ -546,16 +546,12 @@ Recomendación
         self.single_log.see(tk.END)
 
     def send_sms_with_one_retry(self, tg, chip, phone, text, message_id):
-        first = tg.send_sms(chip=chip, to_number=phone, message=text, message_id=message_id)
-        if first.get("success"):
-            first["attempts"] = 1
-            return first
-
-        time.sleep(1)
-        second = tg.send_sms(chip=chip, to_number=phone, message=text, message_id=f"{message_id}_retry")
-        second["attempts"] = 2
-        second["first_raw"] = first.get("raw", "")
-        return second
+        # Envio unico: no se realiza reintento automatico si el TG responde fallido
+        # o si no confirma el envio. Esto evita posibles SMS duplicados cuando
+        # el TG queda con buffer y luego recupera senal.
+        result = tg.send_sms(chip=chip, to_number=phone, message=text, message_id=message_id)
+        result["attempts"] = 1
+        return result
 
     def send_single_sms_worker(self, phone, message, chip):
         tg = None
